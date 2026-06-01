@@ -1,0 +1,199 @@
+#include <windows.h>
+#include <d3d11.h>
+#include <dxgi.h>
+#include <string>
+#include <vector>
+#include <iostream>
+#include <TlHelp32.h>
+#include "imgui.h"
+#include "imgui_impl_dx11.h"
+#include "imgui_impl_win32.h"
+
+#pragma comment(lib, "d3d11.lib")
+
+// ============== OFFSETS (Update these often - check UC or offset sites) ==============
+namespace offsets {
+    uintptr_t DataModel = 0x1DCD0B0;           // Update 2026
+    uintptr_t Workspace = 0x1A0;               // DataModel + this
+    uintptr_t Players = 0x1B8;                 // Workspace + this or DataModel + offset
+    uintptr_t LocalPlayer = 0x1A0;             // Players + this
+    uintptr_t Character = 0x1A8;               // Player + this
+    uintptr_t HumanoidRootPart = 0x1C0;        // Character + this
+    uintptr_t Head = 0x1B0;
+    uintptr_t Humanoid = 0x1B8;
+    uintptr_t Health = 0x1F8;                  // Humanoid + this
+    uintptr_t MaxHealth = 0x1FC;
+    uintptr_t Name = 0x28;                     // Player name string
+    uintptr_t Camera = 0x1C0;                  // Workspace + this
+    uintptr_t ViewMatrix = 0x4C0;              // Camera + this (approx)
+}
+
+// Simple Vector structs
+struct Vector3 { float x, y, z; };
+struct Vector2 { float x, y; };
+
+struct Player {
+    uintptr_t address;
+    std::string name;
+    Vector3 position;
+    float health;
+    float maxHealth;
+    bool isLocalPlayer;
+};
+
+class RobloxExternal {
+public:
+    HWND hwnd = NULL;
+    ID3D11Device* device = nullptr;
+    ID3D11DeviceContext* context = nullptr;
+    IDXGISwapChain* swapchain = nullptr;
+    ID3D11RenderTargetView* rtv = nullptr;
+
+    HANDLE hProcess = NULL;
+    uintptr_t moduleBase = 0;
+    DWORD procId = 0;
+
+    bool espEnabled = true;
+    bool aimbotEnabled = false;
+    float fov = 120.0f;
+
+    std::vector<Player> players;
+
+    bool Attach() {
+        procId = GetProcId(L"RobloxPlayerBeta.exe");
+        if (!procId) return false;
+
+        hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, procId);
+        if (!hProcess) return false;
+
+        moduleBase = GetModuleBase(procId, L"RobloxPlayerBeta.exe");
+        std::cout << "Attached to Roblox | Base: 0x" << std::hex << moduleBase << std::endl;
+        return true;
+    }
+
+    DWORD GetProcId(const wchar_t* procName) {
+        DWORD procId = 0;
+        HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (hSnap != INVALID_HANDLE_VALUE) {
+            PROCESSENTRY32 procEntry;
+            procEntry.dwSize = sizeof(procEntry);
+            if (Process32First(hSnap, &procEntry)) {
+                do {
+                    if (!_wcsicmp(procEntry.szExeFile, procName)) {
+                        procId = procEntry.th32ProcessID;
+                        break;
+                    }
+                } while (Process32Next(hSnap, &procEntry));
+            }
+        }
+        CloseHandle(hSnap);
+        return procId;
+    }
+
+    uintptr_t GetModuleBase(DWORD procId, const wchar_t* modName) {
+        uintptr_t modBase = 0;
+        HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, procId);
+        if (hSnap != INVALID_HANDLE_VALUE) {
+            MODULEENTRY32 modEntry;
+            modEntry.dwSize = sizeof(modEntry);
+            if (Module32First(hSnap, &modEntry)) {
+                do {
+                    if (!_wcsicmp(modEntry.szModule, modName)) {
+                        modBase = (uintptr_t)modEntry.modBaseAddr;
+                        break;
+                    }
+                } while (Module32Next(hSnap, &modEntry));
+            }
+        }
+        CloseHandle(hSnap);
+        return modBase;
+    }
+
+    template<typename T> T RPM(uintptr_t addr) {
+        T value;
+        ReadProcessMemory(hProcess, (LPCVOID)addr, &value, sizeof(T), nullptr);
+        return value;
+    }
+
+    void UpdatePlayers() {
+        players.clear();
+
+        uintptr_t dataModel = moduleBase + offsets::DataModel;
+        uintptr_t workspace = RPM<uintptr_t>(dataModel + offsets::Workspace);
+        uintptr_t playersList = RPM<uintptr_t>(workspace + offsets::Players); // adjust if needed
+
+        // Walk player list (Roblox uses linked lists / children)
+        // Simplified - real one needs proper instance traversal
+        uintptr_t localPlayer = RPM<uintptr_t>(playersList + offsets::LocalPlayer);
+
+        // For demo: scan for characters in workspace (you'll want better traversal)
+        // This is the dirty part - expand with proper Instance children loop
+    }
+
+    Vector2 WorldToScreen(Vector3 pos, float matrix[16], int screenWidth, int screenHeight) {
+        Vector2 screen;
+        float w = matrix[3] * pos.x + matrix[7] * pos.y + matrix[11] * pos.z + matrix[15];
+        if (w < 0.1f) return { -1, -1 };
+
+        float inv_w = 1.0f / w;
+        screen.x = (matrix[0] * pos.x + matrix[4] * pos.y + matrix[8] * pos.z + matrix[12]) * inv_w;
+        screen.y = (matrix[1] * pos.x + matrix[5] * pos.y + matrix[9] * pos.z + matrix[13]) * inv_w;
+
+        screen.x = (screenWidth / 2.0f) + (screen.x * screenWidth / 2.0f);
+        screen.y = (screenHeight / 2.0f) - (screen.y * screenHeight / 2.0f);
+        return screen;
+    }
+
+    void RenderESP() {
+        // ImGui drawing here - boxes, names etc.
+        // Example:
+        ImGui::GetBackgroundDrawList()->AddRect(ImVec2(100,100), ImVec2(200,300), IM_COL32(255,0,0,255));
+    }
+};
+
+// Window Proc etc. for overlay (standard ImGui DX11 setup)
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
+        return true;
+    return DefWindowProc(hWnd, msg, wParam, lParam);
+}
+
+int main() {
+    RobloxExternal cheat;
+    if (!cheat.Attach()) {
+        std::cout << "Failed to attach, bitch.\n";
+        return 1;
+    }
+
+    // Create transparent overlay window
+    WNDCLASSEX wc = { sizeof(WNDCLASSEX), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(NULL), NULL, NULL, NULL, NULL, L"Overlay", NULL };
+    RegisterClassEx(&wc);
+    HWND hwnd = CreateWindowEx(WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_LAYERED, wc.lpszClassName, L"Roblox External", WS_POPUP, 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN), NULL, NULL, wc.hInstance, NULL);
+    SetLayeredWindowAttributes(hwnd, RGB(0,0,0), 255, LWA_ALPHA);
+
+    // DX11 setup + ImGui init (standard code - I assume you have ImGui files)
+
+    MSG msg;
+    while (true) {
+        if (PeekMessage(&msg, NULL, 0U, 0U, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+            if (msg.message == WM_QUIT) break;
+        }
+
+        cheat.UpdatePlayers();
+        // Render ImGui frame with ESP
+        ImGui_ImplDX11_NewFrame();
+        ImGui_ImplWin32_NewFrame();
+        ImGui::NewFrame();
+
+        if (cheat.espEnabled) cheat.RenderESP();
+
+        ImGui::Render();
+        // Clear + Present
+    }
+
+    return 0;
+}
