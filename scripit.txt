@@ -1,0 +1,820 @@
+-- // Dear ImGui Premium Internal v9.0 //
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Stats = game:GetService("Stats")
+local SoundService = game:GetService("SoundService")
+local Lighting = game:GetService("Lighting")
+local LogService = game:GetService("LogService")
+
+-- // Modernized UI Style Palette //
+local Style = {
+    WindowBg = Color3.fromRGB(11, 11, 14),       
+    TitleBg = Color3.fromRGB(16, 16, 20),        
+    TabBg = Color3.fromRGB(20, 20, 25),          
+    TabActive = Color3.fromRGB(28, 28, 35),
+    HeaderBg = Color3.fromRGB(32, 32, 40),
+    FrameBg = Color3.fromRGB(18, 18, 22),        
+    FrameBorder = Color3.fromRGB(38, 38, 45),    
+    Accent = Color3.fromRGB(0, 255, 150),       
+    Text = Color3.fromRGB(250, 250, 250),
+    TextMuted = Color3.fromRGB(140, 140, 150),
+    Font = Enum.Font.RobotoMono,
+    FontSize = 13
+}
+
+local Palette = {
+    Color3.fromRGB(255, 255, 255), 
+    Color3.fromRGB(255, 50, 50),   
+    Color3.fromRGB(0, 255, 150),   
+    Color3.fromRGB(50, 100, 255),  
+    Color3.fromRGB(255, 255, 50),  
+    Color3.fromRGB(200, 50, 255)   
+}
+
+local Settings = {
+    -- Combat
+    Aimbot = false, WallCheckAim = true, StickyAim = false, TeamCheckAim = true,
+    FOV = 100, Smoothness = 0.1, HitChance = 100, Deadzone = 5,
+    AimPart = "Head", Keybind = Enum.KeyCode.Q, AimMode = "Hold",
+    
+    -- Visuals
+    ESPBox = false, ESPHealth = false, ESPNames = false, ESPDistance = false, ESPSkeleton = false,
+    ESPWallCheck = false, ESPTeamCheck = false, SelfESP = false, DrawFOV = false, CustomCrosshair = false,
+    BoxCol = 1, HealthCol = 3, NameCol = 1, DistCol = 5, FOVCol = 3, CrosshairCol = 3,
+    
+    -- Misc
+    WalkSpeedMod = false, WalkSpeedVal = 16,
+    Watermark = true, ShowPerfStats = false, MenuKey = Enum.KeyCode.RightShift
+}
+
+local Aiming, CurrentTarget, ESPObjects, SkeletonObjects = false, nil, {}, {}
+local ActiveTab = "Combat"
+local TabContainers = {}
+local TabButtons = {}
+local ChosenModule = "UNIVERSAL"
+local PhonkSound = nil
+
+-- // SCREEN LAYER & CORE INITIALIZATION (FORCED ABSOLUTE COVERAGE) //
+local ScreenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.IgnoreGuiInset = true 
+
+-- // BLUR & DARK TINT ENGINE LAYER //
+local Blur = Instance.new("BlurEffect")
+Blur.Size = 0
+Blur.Enabled = true
+Blur.Name = "PremiumSuite_Blur"
+Blur.Parent = Lighting
+
+local DarkOverlay = Instance.new("Frame", ScreenGui)
+DarkOverlay.Size = UDim2.new(1, 0, 1, 0)
+DarkOverlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+DarkOverlay.BackgroundTransparency = 1
+DarkOverlay.BorderSizePixel = 0
+DarkOverlay.ZIndex = 1
+DarkOverlay.Visible = false
+
+-- // HELPER MODULES //
+local function AddCorner(obj, radius)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, radius or 4)
+    c.Parent = obj
+    return c
+end
+
+local function AddStroke(obj, color, thickness)
+    local s = Instance.new("UIStroke")
+    s.Color = color or Style.FrameBorder
+    s.Thickness = thickness or 1
+    s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    s.Parent = obj
+    return s
+end
+
+local function PlayTween(obj, info, target)
+    local t = TweenService:Create(obj, info, target)
+    t:Play()
+    return t
+end
+
+-- // CORE WINDOW SCHEMATIC //
+local MainFrame = Instance.new("Frame", ScreenGui)
+MainFrame.Size = UDim2.new(0, 410, 0, 520) 
+MainFrame.Position = UDim2.new(0.5, -205, 0.5, -260)
+MainFrame.BackgroundColor3 = Style.WindowBg
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true; MainFrame.Draggable = true
+MainFrame.Visible = false 
+MainFrame.ZIndex = 5
+AddCorner(MainFrame, 6)
+AddStroke(MainFrame, Style.FrameBorder, 1)
+
+-- // BLACK BALL SIMULATION ENGINE LAYER //
+local Snowflakes = {}
+local MaxSnowflakes = 45
+local SnowflakeContainer = Instance.new("Frame", ScreenGui)
+SnowflakeContainer.Size = UDim2.new(1, 0, 1, 0)
+SnowflakeContainer.BackgroundTransparency = 1
+SnowflakeContainer.Visible = false
+SnowflakeContainer.ZIndex = 2
+
+for i = 1, MaxSnowflakes do
+    local flake = Instance.new("TextLabel", SnowflakeContainer)
+    flake.BackgroundTransparency = 1
+    flake.Text = "●" 
+    flake.TextColor3 = Color3.fromRGB(0, 0, 0) 
+    flake.TextSize = math.random(8, 14)
+    flake.Font = Enum.Font.SourceSans
+    flake.TextTransparency = math.random(1, 4) / 10
+    flake.Position = UDim2.new(math.random(), 0, 0, math.random(0, Camera.ViewportSize.Y))
+    
+    table.insert(Snowflakes, {
+        Object = flake,
+        Speed = math.random(40, 95),
+        Drift = math.random(-20, 20)
+    })
+end
+
+-- // WINDOW BASE SUB-TEXT TITLE //
+local TitleBar = Instance.new("Frame", MainFrame)
+TitleBar.Size = UDim2.new(1, 0, 0, 28); TitleBar.BackgroundColor3 = Style.TitleBg; TitleBar.BorderSizePixel = 0
+AddCorner(TitleBar, 6)
+
+local TitleText = Instance.new("TextLabel", TitleBar)
+TitleText.Size = UDim2.new(1, -10, 1, 0); TitleText.Position = UDim2.new(0, 10, 0, 0); TitleText.Text = "Premium Suite v9.0"
+TitleText.Font = Style.Font; TitleText.TextSize = Style.FontSize; TitleText.TextColor3 = Style.Text; TitleText.TextXAlignment = Enum.TextXAlignment.Left; TitleText.BackgroundTransparency = 1
+
+-- // STAGE 2: GAME MODULE SELECTION SCREEN //
+local SelectionFrame = Instance.new("Frame", ScreenGui)
+SelectionFrame.Size = UDim2.new(0, 300, 0, 170)
+SelectionFrame.Position = UDim2.new(0.5, -150, 0.5, -85)
+SelectionFrame.BackgroundColor3 = Style.WindowBg
+SelectionFrame.Visible = false
+SelectionFrame.ZIndex = 6
+AddCorner(SelectionFrame, 6)
+AddStroke(SelectionFrame, Style.FrameBorder, 1)
+
+local SelectionTitle = Instance.new("TextLabel", SelectionFrame)
+SelectionTitle.Size = UDim2.new(1, 0, 0, 35)
+SelectionTitle.BackgroundColor3 = Style.TitleBg
+SelectionTitle.Text = "SELECT ENVIRONMENT PROFILE"
+SelectionTitle.Font = Style.Font; SelectionTitle.TextSize = 13; SelectionTitle.TextColor3 = Style.Accent
+AddCorner(SelectionTitle, 6)
+
+local UniversalBtn = Instance.new("TextButton", SelectionFrame)
+UniversalBtn.Size = UDim2.new(1, -30, 0, 35)
+UniversalBtn.Position = UDim2.new(0, 15, 0, 60)
+UniversalBtn.BackgroundColor3 = Style.TabBg
+UniversalBtn.Text = "UNIVERSAL ENGINE"
+UniversalBtn.Font = Style.Font; UniversalBtn.TextSize = 13; UniversalBtn.TextColor3 = Style.Text
+AddCorner(UniversalBtn, 4)
+AddStroke(UniversalBtn, Style.FrameBorder, 1)
+
+local DaHoodBtn = Instance.new("TextButton", SelectionFrame)
+DaHoodBtn.Size = UDim2.new(1, -30, 0, 35)
+DaHoodBtn.Position = UDim2.new(0, 15, 0, 110)
+DaHoodBtn.BackgroundColor3 = Style.TabBg
+DaHoodBtn.Text = "DA HOOD HYBRID"
+DaHoodBtn.Font = Style.Font; DaHoodBtn.TextSize = 13; DaHoodBtn.TextColor3 = Style.Text
+AddCorner(DaHoodBtn, 4)
+AddStroke(DaHoodBtn, Style.FrameBorder, 1)
+
+local function InitializeMainDashboard(choiceName)
+    ChosenModule = choiceName
+    TitleText.Text = "Premium Suite v9.0 [" .. ChosenModule .. "]"
+    
+    PlayTween(SelectionFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Position = UDim2.new(0.5, -150, 0.5, -300), BackgroundTransparency = 1})
+    task.wait(0.3)
+    SelectionFrame:Destroy()
+    
+    DarkOverlay.Visible = true
+    SnowflakeContainer.Visible = true
+    MainFrame.Visible = true
+    
+    PlayTween(Blur, TweenInfo.new(0.3), {Size = 20})
+    PlayTween(DarkOverlay, TweenInfo.new(0.3), {BackgroundTransparency = 0.55}) 
+end
+
+UniversalBtn.MouseEnter:Connect(function() PlayTween(UniversalBtn, TweenInfo.new(0.2), {BackgroundColor3 = Style.HeaderBg, TextColor3 = Style.Accent}) end)
+UniversalBtn.MouseLeave:Connect(function() PlayTween(UniversalBtn, TweenInfo.new(0.2), {BackgroundColor3 = Style.TabBg, TextColor3 = Style.Text}) end)
+UniversalBtn.MouseButton1Click:Connect(function() InitializeMainDashboard("UNIVERSAL") end)
+
+DaHoodBtn.MouseEnter:Connect(function() PlayTween(DaHoodBtn, TweenInfo.new(0.2), {BackgroundColor3 = Style.HeaderBg, TextColor3 = Style.Accent}) end)
+DaHoodBtn.MouseLeave:Connect(function() PlayTween(DaHoodBtn, TweenInfo.new(0.2), {BackgroundColor3 = Style.TabBg, TextColor3 = Style.Text}) end)
+DaHoodBtn.MouseButton1Click:Connect(function() InitializeMainDashboard("DAHOOD") end)
+
+-- // STAGE 1: KEY INFRASTRUCTURE SYSTEM //
+local KeyFrame = Instance.new("Frame", ScreenGui)
+KeyFrame.Size = UDim2.new(0, 300, 0, 170)
+KeyFrame.Position = UDim2.new(0.5, -150, 0.5, -85)
+KeyFrame.BackgroundColor3 = Style.WindowBg
+KeyFrame.ZIndex = 7
+AddCorner(KeyFrame, 6)
+AddStroke(KeyFrame, Style.FrameBorder, 1)
+
+local KeyTitle = Instance.new("TextLabel", KeyFrame)
+KeyTitle.Size = UDim2.new(1, 0, 0, 35)
+KeyTitle.BackgroundColor3 = Style.TitleBg
+KeyTitle.Text = "AUTHENTICATION REQUIRED"
+KeyTitle.Font = Style.Font; KeyTitle.TextSize = 13; KeyTitle.TextColor3 = Style.Accent
+AddCorner(KeyTitle, 6)
+
+local KeyInput = Instance.new("TextBox", KeyFrame)
+KeyInput.Size = UDim2.new(1, -30, 0, 32)
+KeyInput.Position = UDim2.new(0, 15, 0, 60)
+KeyInput.BackgroundColor3 = Style.FrameBg
+KeyInput.PlaceholderText = "Enter Passkey..."
+KeyInput.Text = ""
+KeyInput.Font = Style.Font; KeyInput.TextSize = 13; KeyInput.TextColor3 = Style.Text
+AddCorner(KeyInput, 4)
+AddStroke(KeyInput, Style.FrameBorder, 1)
+
+local KeyButton = Instance.new("TextButton", KeyFrame)
+KeyButton.Size = UDim2.new(1, -30, 0, 32)
+KeyButton.Position = UDim2.new(0, 15, 0, 110)
+KeyButton.BackgroundColor3 = Style.TabBg
+KeyButton.Text = "Verify Key"
+KeyButton.Font = Style.Font; KeyButton.TextSize = 13; KeyButton.TextColor3 = Style.Text
+AddCorner(KeyButton, 4)
+AddStroke(KeyButton, Style.FrameBorder, 1)
+
+KeyButton.MouseEnter:Connect(function() PlayTween(KeyButton, TweenInfo.new(0.2), {BackgroundColor3 = Style.HeaderBg, TextColor3 = Style.Accent}) end)
+KeyButton.MouseLeave:Connect(function() PlayTween(KeyButton, TweenInfo.new(0.2), {BackgroundColor3 = Style.TabBg, TextColor3 = Style.Text}) end)
+
+KeyButton.MouseButton1Click:Connect(function()
+    if KeyInput.Text:lower() == "beta" then
+        KeyTitle.Text = "ACCESS GRANTED"
+        KeyTitle.TextColor3 = Color3.fromRGB(50, 255, 50)
+        task.wait(0.5)
+        PlayTween(KeyFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Position = UDim2.new(0.5, -150, 0.5, -300), BackgroundTransparency = 1})
+        task.wait(0.3)
+        KeyFrame:Destroy()
+        SelectionFrame.Visible = true
+    else
+        KeyTitle.Text = "INVALID KEY"
+        KeyTitle.TextColor3 = Color3.fromRGB(255, 50, 50)
+        task.wait(1)
+        KeyTitle.Text = "AUTHENTICATION REQUIRED"
+        KeyTitle.TextColor3 = Style.Accent
+    end
+end)
+
+-- // MAIN INTERFACE CORE //
+local TabBar = Instance.new("Frame", MainFrame)
+TabBar.Size = UDim2.new(1, -16, 0, 26); TabBar.Position = UDim2.new(0, 8, 0, 36); TabBar.BackgroundColor3 = Style.WindowBg; TabBar.BorderSizePixel = 0
+local TabListLayout = Instance.new("UIListLayout", TabBar); TabListLayout.FillDirection = Enum.FillDirection.Horizontal; TabListLayout.Padding = UDim.new(0, 4)
+
+local function SwitchTab(tabName)
+    ActiveTab = tabName
+    for name, container in pairs(TabContainers) do container.Visible = (name == tabName) end
+end
+
+local function CreateTab(name)
+    local btn = Instance.new("TextButton", TabBar)
+    btn.Size = UDim2.new(0.25, -3, 1, 0); btn.BackgroundColor3 = Style.TabBg; btn.Text = name
+    btn.Font = Style.Font; btn.TextSize = Style.FontSize - 1; btn.TextColor3 = Style.TextMuted; btn.BorderSizePixel = 0
+    AddCorner(btn, 4)
+    AddStroke(btn, Style.FrameBorder, 1)
+    
+    local container = Instance.new("ScrollingFrame", MainFrame)
+    container.Size = UDim2.new(1, -16, 1, -76); container.Position = UDim2.new(0, 8, 0, 68)
+    container.BackgroundTransparency = 1; container.ScrollBarThickness = 3; container.Visible = false; container.BorderSizePixel = 0
+    container.ScrollBarImageColor3 = Style.Accent
+    
+    local layout = Instance.new("UIListLayout", container); layout.Padding = UDim.new(0, 6)
+    layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() 
+        container.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 20) 
+    end)
+    
+    btn.MouseButton1Click:Connect(function() SwitchTab(name) end)
+    
+    TabButtons[name] = btn
+    TabContainers[name] = container
+    return container
+end
+
+-- // INTERACTIVE COMPONENT CREATORS //
+local function CreateCheckbox(parent, name, configKey)
+    local row = Instance.new("TextButton", parent); row.Size = UDim2.new(1, 0, 0, 24); row.BackgroundTransparency = 1; row.Text = ""
+    local box = Instance.new("Frame", row); box.Size = UDim2.new(0, 14, 0, 14); box.Position = UDim2.new(0, 6, 0.5, -7); box.BackgroundColor3 = Style.FrameBg; box.BorderSizePixel = 0
+    AddCorner(box, 3)
+    local stroke = AddStroke(box, Style.FrameBorder, 1)
+    
+    local lbl = Instance.new("TextLabel", row); lbl.Size = UDim2.new(1, -28, 1, 0); lbl.Position = UDim2.new(0, 28, 0, 0); lbl.Text = name; lbl.Font = Style.Font; lbl.TextSize = Style.FontSize; lbl.TextColor3 = Style.Text; lbl.TextXAlignment = Enum.TextXAlignment.Left; lbl.BackgroundTransparency = 1
+    
+    row.MouseButton1Click:Connect(function() Settings[configKey] = not Settings[configKey] end)
+    RunService.RenderStepped:Connect(function()
+        local targetColor = Settings[configKey] and Style.Accent or Style.FrameBg
+        local targetBorder = Settings[configKey] and Style.Accent or Style.FrameBorder
+        PlayTween(box, TweenInfo.new(0.15), {BackgroundColor3 = targetColor})
+        PlayTween(stroke, TweenInfo.new(0.15), {Color = targetBorder})
+    end)
+end
+
+local function CreateSlider(parent, name, min, max, configKey)
+    local row = Instance.new("Frame", parent); row.Size = UDim2.new(1, 0, 0, 26); row.BackgroundTransparency = 1
+    local lbl = Instance.new("TextLabel", row); lbl.Size = UDim2.new(0.4, 0, 1, 0); lbl.Position = UDim2.new(0, 6, 0, 0); lbl.Text = name; lbl.Font = Style.Font; lbl.TextSize = Style.FontSize; lbl.TextColor3 = Style.Text; lbl.TextXAlignment = Enum.TextXAlignment.Left; lbl.BackgroundTransparency = 1
+    
+    local bar = Instance.new("TextButton", row); bar.Size = UDim2.new(0.55, -6, 0, 10); bar.Position = UDim2.new(0.45, 0, 0.5, -5); bar.BackgroundColor3 = Style.FrameBg; bar.BorderSizePixel = 0
+    AddCorner(bar, 3)
+    AddStroke(bar, Style.FrameBorder, 1)
+    
+    local fill = Instance.new("Frame", bar); fill.Size = UDim2.new((Settings[configKey]-min)/(max-min), 0, 1, 0); fill.BackgroundColor3 = Style.Accent; fill.BorderSizePixel = 0
+    AddCorner(fill, 3)
+    
+    local valLbl = Instance.new("TextLabel", bar); valLbl.Size = UDim2.new(1, 0, 1, 0); valLbl.Text = tostring(Settings[configKey]); valLbl.Font = Style.Font; valLbl.TextSize = Style.FontSize - 2; valLbl.TextColor3 = Style.Text; valLbl.BackgroundTransparency = 1
+    
+    bar.MouseButton1Down:Connect(function()
+        local c; c = RunService.RenderStepped:Connect(function()
+            local x = math.clamp((UserInputService:GetMouseLocation().X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+            local val = min + (max - min) * x; val = max > 10 and math.floor(val) or math.floor(val*100)/100
+            Settings[configKey] = val; fill.Size = UDim2.new(x, 0, 1, 0); valLbl.Text = tostring(val)
+            if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then c:Disconnect() end
+        end)
+    end)
+end
+
+local function CreateTextCycle(parent, name, options, configKey)
+    local row = Instance.new("Frame", parent); row.Size = UDim2.new(1, 0, 0, 26); row.BackgroundTransparency = 1
+    local lbl = Instance.new("TextLabel", row); lbl.Size = UDim2.new(0.4, 0, 1, 0); lbl.Position = UDim2.new(0, 6, 0, 0); lbl.Text = name; lbl.Font = Style.Font; lbl.TextSize = Style.FontSize; lbl.TextColor3 = Style.Text; lbl.TextXAlignment = Enum.TextXAlignment.Left; lbl.BackgroundTransparency = 1
+    
+    local btn = Instance.new("TextButton", row); btn.Size = UDim2.new(0.55, -6, 0, 20); btn.Position = UDim2.new(0.45, 0, 0.5, -10); btn.BackgroundColor3 = Style.FrameBg; btn.Font = Style.Font; btn.TextSize = Style.FontSize; btn.TextColor3 = Style.Accent
+    AddCorner(btn, 3)
+    AddStroke(btn, Style.FrameBorder, 1)
+    
+    btn.MouseButton1Click:Connect(function()
+        local currentIdx = table.find(options, Settings[configKey]) or 1
+        local nextIdx = currentIdx + 1
+        if nextIdx > #options then nextIdx = 1 end
+        Settings[configKey] = options[nextIdx]
+        btn.Text = tostring(options[nextIdx])
+    end)
+    btn.Text = tostring(Settings[configKey])
+end
+
+local function CreateColorCycle(parent, name, configKey)
+    local colorNames = {"White", "Red", "Mint", "Blue", "Yellow", "Purple"}
+    local row = Instance.new("Frame", parent); row.Size = UDim2.new(1, 0, 0, 26); row.BackgroundTransparency = 1
+    local lbl = Instance.new("TextLabel", row); lbl.Size = UDim2.new(0.4, 0, 1, 0); lbl.Position = UDim2.new(0, 6, 0, 0); lbl.Text = name; lbl.Font = Style.Font; lbl.TextSize = Style.FontSize; lbl.TextColor3 = Style.Text; lbl.TextXAlignment = Enum.TextXAlignment.Left; lbl.BackgroundTransparency = 1
+    
+    local btn = Instance.new("TextButton", row); btn.Size = UDim2.new(0.55, -6, 0, 20); btn.Position = UDim2.new(0.45, 0, 0.5, -10); btn.BackgroundColor3 = Style.FrameBg; btn.Font = Style.Font; btn.TextSize = Style.FontSize; btn.TextColor3 = Palette[Settings[configKey]]
+    AddCorner(btn, 3)
+    AddStroke(btn, Style.FrameBorder, 1)
+    
+    btn.MouseButton1Click:Connect(function()
+        local nextVal = Settings[configKey] + 1
+        if nextVal > #Palette then nextVal = 1 end
+        Settings[configKey] = nextVal
+        btn.Text = colorNames[nextVal]
+        btn.TextColor3 = Palette[nextVal]
+    end)
+    btn.Text = colorNames[Settings[configKey]]
+end
+
+local function CreateKeybind(parent, name, configKey)
+    local row = Instance.new("Frame", parent); row.Size = UDim2.new(1, 0, 0, 26); row.BackgroundTransparency = 1
+    local lbl = Instance.new("TextLabel", row); lbl.Size = UDim2.new(0.4, 0, 1, 0); lbl.Position = UDim2.new(0, 6, 0, 0); lbl.Text = name; lbl.Font = Style.Font; lbl.TextSize = Style.FontSize; lbl.TextColor3 = Style.Text; lbl.TextXAlignment = Enum.TextXAlignment.Left; lbl.BackgroundTransparency = 1
+    
+    local btn = Instance.new("TextButton", row); btn.Size = UDim2.new(0.55, -6, 0, 20); btn.Position = UDim2.new(0.45, 0, 0.5, -10); btn.BackgroundColor3 = Style.FrameBg; btn.Font = Style.Font; btn.TextSize = Style.FontSize; btn.TextColor3 = Style.Accent
+    AddCorner(btn, 3)
+    AddStroke(btn, Style.FrameBorder, 1)
+    
+    btn.Text = Settings[configKey].Name
+    btn.MouseButton1Click:Connect(function()
+        btn.Text = "..."
+        local connection;
+        connection = UserInputService.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.Keyboard then
+                Settings[configKey] = input.KeyCode
+                btn.Text = input.KeyCode.Name
+                connection:Disconnect()
+            end
+        end)
+    end)
+end
+
+local function CreateButton(parent, name, callback)
+    local row = Instance.new("Frame", parent); row.Size = UDim2.new(1, 0, 0, 30); row.BackgroundTransparency = 1
+    local btn = Instance.new("TextButton", row); btn.Size = UDim2.new(1, -12, 0, 24); btn.Position = UDim2.new(0, 6, 0.5, -12); btn.BackgroundColor3 = Style.FrameBg; btn.Font = Style.Font; btn.TextSize = Style.FontSize; btn.TextColor3 = Style.Text
+    btn.Text = name
+    AddCorner(btn, 4)
+    AddStroke(btn, Style.FrameBorder, 1)
+    
+    btn.MouseEnter:Connect(function() PlayTween(btn, TweenInfo.new(0.2), {BackgroundColor3 = Style.HeaderBg, TextColor3 = Style.Accent}) end)
+    btn.MouseLeave:Connect(function() PlayTween(btn, TweenInfo.new(0.2), {BackgroundColor3 = Style.FrameBg, TextColor3 = Style.Text}) end)
+    btn.MouseButton1Click:Connect(callback)
+    return btn
+end
+
+-- New Live Data Field Component for Server Panel
+local function CreateDataField(parent, titleText, initialValue)
+    local row = Instance.new("Frame", parent)
+    row.Size = UDim2.new(1, 0, 0, 30)
+    row.BackgroundColor3 = Style.FrameBg
+    AddCorner(row, 4)
+    AddStroke(row, Style.FrameBorder, 1)
+    
+    local lbl = Instance.new("TextLabel", row)
+    lbl.Size = UDim2.new(0.4, 0, 1, 0)
+    lbl.Position = UDim2.new(0, 8, 0, 0)
+    lbl.Text = titleText
+    lbl.Font = Style.Font
+    lbl.TextSize = Style.FontSize
+    lbl.TextColor3 = Style.TextMuted
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.BackgroundTransparency = 1
+    
+    local val = Instance.new("TextLabel", row)
+    val.Size = UDim2.new(0.6, -16, 1, 0)
+    val.Position = UDim2.new(0.4, 8, 0, 0)
+    val.Text = initialValue
+    val.Font = Style.Font
+    val.TextSize = Style.FontSize
+    val.TextColor3 = Style.Accent
+    val.TextXAlignment = Enum.TextXAlignment.Right
+    val.BackgroundTransparency = 1
+    
+    return val
+end
+
+-- // INSTANTIATE UI WINDOW SECTIONS //
+local tCombat = CreateTab("Combat")
+CreateCheckbox(tCombat, "Enable Aimbot", "Aimbot")
+CreateCheckbox(tCombat, "Aimbot Wallcheck", "WallCheckAim")
+CreateCheckbox(tCombat, "Aimbot Team Check", "TeamCheckAim")
+CreateCheckbox(tCombat, "Sticky Target Lock", "StickyAim")
+CreateTextCycle(tCombat, "Target Bone", {"Head", "HumanoidRootPart", "Torso"}, "AimPart")
+CreateTextCycle(tCombat, "Aim Activation", {"Hold", "Toggle"}, "AimMode")
+CreateKeybind(tCombat, "Aimbot Keybind", "Keybind")
+CreateSlider(tCombat, "Aim Smoothness", 0.01, 1, "Smoothness")
+CreateSlider(tCombat, "FOV Radius", 10, 600, "FOV")
+CreateSlider(tCombat, "Hit Chance (%)", 1, 100, "HitChance")
+CreateSlider(tCombat, "Aim Deadzone (px)", 0, 50, "Deadzone")
+
+local tVisuals = CreateTab("Visuals")
+CreateCheckbox(tVisuals, "Custom Center Crosshair", "CustomCrosshair")
+CreateColorCycle(tVisuals, "Crosshair Color", "CrosshairCol")
+CreateCheckbox(tVisuals, "Draw FOV Circle", "DrawFOV")
+CreateColorCycle(tVisuals, "FOV Circle Color", "FOVCol")
+CreateCheckbox(tVisuals, "Skeleton ESP", "ESPSkeleton")
+CreateCheckbox(tVisuals, "Bounding Box", "ESPBox")
+CreateColorCycle(tVisuals, "Box Base Color", "BoxCol")
+CreateCheckbox(tVisuals, "Health Bar", "ESPHealth")
+CreateColorCycle(tVisuals, "Health Tracker Color", "HealthCol")
+CreateCheckbox(tVisuals, "Player Names", "ESPNames")
+CreateColorCycle(tVisuals, "Name Tag Color", "NameCol")
+CreateCheckbox(tVisuals, "Distance Data", "ESPDistance")
+CreateColorCycle(tVisuals, "Distance Label Color", "DistCol")
+CreateCheckbox(tVisuals, "ESP Team Check", "ESPTeamCheck")
+CreateCheckbox(tVisuals, "ESP Wallcheck", "ESPWallCheck")
+
+local tMisc = CreateTab("Misc")
+CreateCheckbox(tMisc, "Enable WalkSpeed Mod", "WalkSpeedMod")
+CreateSlider(tMisc, "WalkSpeed Target", 16, 250, "WalkSpeedVal")
+
+local PhonkBtn;
+PhonkBtn = CreateButton(tMisc, "Play: 67 KID PHONK", function()
+    if PhonkSound and PhonkSound.IsPlaying then
+        PhonkSound:Stop()
+        PhonkBtn.Text = "Play: 67 KID PHONK"
+        PhonkBtn.TextColor3 = Style.Text
+    else
+        if not PhonkSound then
+            PhonkSound = Instance.new("Sound")
+            PhonkSound.SoundId = "rbxassetid://125476440612900"
+            PhonkSound.Volume = 2
+            PhonkSound.Looped = true
+            PhonkSound.Parent = SoundService
+        end
+        PhonkSound:Play()
+        PhonkBtn.Text = "Stop: 67 KID PHONK"
+        PhonkBtn.TextColor3 = Style.Accent
+    end
+end)
+
+CreateCheckbox(tMisc, "Show Watermark", "Watermark")
+CreateCheckbox(tMisc, "Performance Statistics", "ShowPerfStats")
+
+-- // SERVER ANALYTICS PANEL DESIGN //
+local tServer = CreateTab("Server")
+local DisplayCount = CreateDataField(tServer, "Player Count", "1/1")
+local DisplayUptime = CreateDataField(tServer, "Server Uptime", "00:00:00")
+local DisplayJobID = CreateDataField(tServer, "Instance Job ID", game.JobId ~= "" and game.JobId or "Studio Mode Instance")
+local DisplayRegion = CreateDataField(tServer, "Server Region", "Automatic (US-West)")
+
+CreateButton(tServer, "Copy Server Job ID", function()
+    if game.JobId ~= "" then
+        setclipboard(game.JobId)
+    end
+end)
+
+CreateButton(tServer, "Rejoin Current Server", function()
+    game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+end)
+
+-- Standardize Canvas dimensions and hook tab glow elements
+for name, container in pairs(TabContainers) do
+    local layout = container:FindFirstChildOfClass("UIListLayout")
+    if layout then container.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 25) end
+    
+    RunService.RenderStepped:Connect(function() 
+        local btn = TabButtons[name]
+        if btn then
+            if ActiveTab == name then
+                PlayTween(btn, TweenInfo.new(0.12), {BackgroundColor3 = Style.TabActive, TextColor3 = Style.Accent})
+            else
+                PlayTween(btn, TweenInfo.new(0.12), {BackgroundColor3 = Style.TabBg, TextMuted})
+            end
+        end
+    end)
+end
+SwitchTab("Combat")
+
+-- // DRAWING INITIALIZATION INTERFACES //
+local WatermarkObj = Drawing.new("Text")
+WatermarkObj.Visible = false; WatermarkObj.Position = Vector2.new(15, 15); WatermarkObj.Color = Style.Accent; WatermarkObj.Size = 15; WatermarkObj.Outline = true; WatermarkObj.Font = 2
+
+local FOVCircle = Drawing.new("Circle"); FOVCircle.Thickness = 1; FOVCircle.Filled = false
+
+local CrosshairLines = {
+    HLeft = Drawing.new("Line"), HRight = Drawing.new("Line"),
+    VTop = Drawing.new("Line"), VBottom = Drawing.new("Line")
+}
+for _, l in pairs(CrosshairLines) do l.Thickness = 1.5; l.Visible = false end
+
+local R15Skeleton = {
+    {"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"},
+    {"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"}, {"LeftLowerArm", "LeftHand"},
+    {"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"}, {"RightLowerArm", "RightHand"},
+    {"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"}, {"LeftLowerLeg", "LeftFoot"},
+    {"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"}, {"RightLowerLeg", "RightFoot"}
+}
+local R6Skeleton = {
+    {"Head", "Torso"}, {"Torso", "Left Arm"}, {"Torso", "Right Arm"},
+    {"Torso", "Left Leg"}, {"Torso", "Right Leg"}
+}
+
+-- // HUD OVERLAYS //
+local HUDGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui")); HUDGui.ResetOnSpawn = false
+local HUDList = Instance.new("TextLabel", HUDGui)
+HUDList.Size = UDim2.new(0, 200, 0, 300); HUDList.Position = UDim2.new(0, 10, 0, 50); HUDList.BackgroundTransparency = 1; HUDList.TextColor3 = Style.Text
+HUDList.TextXAlignment = Enum.TextXAlignment.Left; HUDList.TextYAlignment = Enum.TextYAlignment.Top; HUDList.Font = Style.Font; HUDList.TextSize = 13; HUDList.TextStrokeTransparency = 0
+
+local PerfGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui")); PerfGui.ResetOnSpawn = false
+local PerfList = Instance.new("TextLabel", PerfGui)
+PerfList.Size = UDim2.new(0, 200, 0, 100); PerfList.Position = UDim2.new(1, -210, 0, 10); PerfList.BackgroundTransparency = 1; PerfList.TextColor3 = Style.Text
+PerfList.TextXAlignment = Enum.TextXAlignment.Right; PerfList.TextYAlignment = Enum.TextYAlignment.Top; PerfList.Font = Style.Font; PerfList.TextSize = 13; PerfList.TextStrokeTransparency = 0
+
+-- // STABILITY RESET MODULE //
+local function CleanESP(p)
+    if ESPObjects[p] then
+        for _, obj in pairs(ESPObjects[p]) do obj.Visible = false end
+    end
+    if SkeletonObjects[p] then
+        for _, line in pairs(SkeletonObjects[p]) do line.Visible = false end
+    end
+end
+
+-- // MATHEMATICAL LOGIC OPERATIONS //
+local function IsVisible(targetPart, checkType)
+    if not Settings[checkType] then return true end
+    local origin = Camera.CFrame.Position
+    local dir = (targetPart.Position - origin)
+    local params = RaycastParams.new(); params.FilterType = Enum.RaycastFilterType.Exclude; params.FilterDescendantsInstances = {LocalPlayer.Character, Camera}
+    local hit = workspace:Raycast(origin, dir, params)
+    return not hit or hit.Instance:IsDescendantOf(targetPart.Parent)
+end
+
+local function GetClosest()
+    if Settings.StickyAim and CurrentTarget and CurrentTarget.Parent then
+        local hum = CurrentTarget.Parent:FindFirstChild("Humanoid")
+        if hum and hum.Health > 0 and IsVisible(CurrentTarget, "WallCheckAim") then
+            local pos, onScreen = Camera:WorldToViewportPoint(CurrentTarget.Position)
+            if onScreen then return CurrentTarget end
+        end
+    end
+    local target, minDst = nil, Settings.FOV
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health > 0 then
+            if Settings.TeamCheckAim and p.Team == LocalPlayer.Team then continue end
+            local part = p.Character:FindFirstChild(Settings.AimPart)
+            if part and IsVisible(part, "WallCheckAim") then
+                local pos, onScreen = Camera:WorldToViewportPoint(part.Position)
+                local dist = (Vector2.new(pos.X, pos.Y) - UserInputService:GetMouseLocation()).Magnitude
+                if onScreen and dist < minDst then minDst = dist; target = part end
+            end
+        end
+    end
+    return target
+end
+
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if gpe then return end
+    if input.KeyCode == Settings.MenuKey then
+        if not SelectionFrame.Parent then 
+            local targetState = not MainFrame.Visible
+            MainFrame.Visible = targetState
+            SnowflakeContainer.Visible = targetState
+            DarkOverlay.Visible = targetState
+            
+            PlayTween(Blur, TweenInfo.new(0.25), {Size = targetState and 20 or 0})
+            PlayTween(DarkOverlay, TweenInfo.new(0.25), {BackgroundTransparency = targetState and 0.55 or 1})
+        end
+    elseif input.KeyCode == Settings.Keybind then
+        Aiming = (Settings.AimMode == "Toggle") and not Aiming or true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.KeyCode == Settings.Keybind and Settings.AimMode == "Hold" then
+        Aiming = false; CurrentTarget = nil
+    end
+end)
+
+-- // REALTIME ENVIRONMENT CALCULATIONS //
+RunService.RenderStepped:Connect(function(deltaTime)
+    WatermarkObj.Visible = Settings.Watermark
+    if Settings.Watermark then WatermarkObj.Text = "Premium Suite v9.0 | Client Mode: " .. ChosenModule end
+
+    PerfList.Visible = Settings.ShowPerfStats
+    if Settings.ShowPerfStats then
+        PerfList.Text = string.format("FPS: %d\nPING: %d ms\nMEM: %d MB", math.floor(1/deltaTime), math.floor(Stats.Network.ServerLookback:GetValue()), math.floor(Stats:GetTotalMemoryUsageMb()))
+    end
+
+    -- Server Tab Real-time Data Hydration Loop
+    if MainFrame.Visible and ActiveTab == "Server" then
+        -- Count population
+        DisplayCount.Text = string.format("%d / %d Players", #Players:GetPlayers(), Players.MaxPlayers)
+        
+        -- Compute running uptime clock
+        local timeInSecs = workspace.DistributedGameTime
+        local hours = math.floor(timeInSecs / 3600)
+        local mins = math.floor((timeInSecs % 3600) / 60)
+        local secs = math.floor(timeInSecs % 60)
+        DisplayUptime.Text = string.format("%02d:%02d:%02d", hours, mins, secs)
+        
+        -- Approximate regional nodes via ping response thresholds
+        local ping = Stats.Network.ServerLookback:GetValue()
+        if ping < 45 then DisplayRegion.Text = "US East Low-Latency Node"
+        elseif ping >= 45 and ping < 100 then DisplayRegion.Text = "US West Main Backbone"
+        elseif ping >= 100 and ping < 180 then DisplayRegion.Text = "EU Central Cluster"
+        else DisplayRegion.Text = "APAC / Oceanic Relay Node" end
+    end
+
+    -- Real-Time Black Ball Simulation Engine Loop
+    if MainFrame.Visible then
+        for _, flake in pairs(Snowflakes) do
+            local currentPos = flake.Object.Position
+            local newY = currentPos.Y.Offset + (flake.Speed * deltaTime)
+            local newX = currentPos.X.Scale + ((flake.Drift / 1000) * deltaTime)
+            
+            if newY > Camera.ViewportSize.Y or newX < 0 or newX > 1 then
+                flake.Object.Position = UDim2.new(math.random(), 0, 0, -20)
+                flake.Speed = math.random(40, 95)
+            else
+                flake.Object.Position = UDim2.new(newX, 0, 0, newY)
+            end
+        end
+    end
+
+    -- Dynamic WalkSpeed Hook Modification
+    if Settings.WalkSpeedMod and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+        LocalPlayer.Character.Humanoid.WalkSpeed = Settings.WalkSpeedVal
+    end
+
+    local activeFeatures = {"Active Modules [" .. ChosenModule .. "]"}
+    if Settings.Aimbot then table.insert(activeFeatures, "- Engine Aimbot (" .. Settings.AimPart .. ")") end
+    if Settings.ESPSkeleton then table.insert(activeFeatures, "- Bone Matrix System") end
+    if Settings.WalkSpeedMod then table.insert(activeFeatures, "- Speed Configuration Active") end
+    HUDList.Text = table.concat(activeFeatures, "\n")
+
+    local center = Camera.ViewportSize / 2
+    local crosshairVisible = Settings.CustomCrosshair and MainFrame.Visible == false 
+    for _, l in pairs(CrosshairLines) do l.Visible = crosshairVisible; l.Color = Palette[Settings.CrosshairCol] end
+    
+    if crosshairVisible then
+        local gap, size = 4, 10
+        CrosshairLines.HLeft.From = Vector2.new(center.X - gap - size, center.Y)
+        CrosshairLines.HLeft.To = Vector2.new(center.X - gap, center.Y)
+        CrosshairLines.HRight.From = Vector2.new(center.X + gap, center.Y)
+        CrosshairLines.HRight.To = Vector2.new(center.X + gap + size, center.Y)
+        CrosshairLines.VTop.From = Vector2.new(center.X, center.Y - gap - size)
+        CrosshairLines.VTop.To = Vector2.new(center.X, center.Y - gap)
+        CrosshairLines.VBottom.From = Vector2.new(center.X, center.Y + gap)
+        CrosshairLines.VBottom.To = Vector2.new(center.X, center.Y + gap + size)
+    end
+
+    FOVCircle.Visible = Settings.DrawFOV
+    if Settings.DrawFOV then
+        FOVCircle.Position = UserInputService:GetMouseLocation()
+        FOVCircle.Radius = Settings.FOV
+        FOVCircle.Color = Palette[Settings.FOVCol]
+    end
+
+    -- Loop Validation ESP Optimization
+    for _, p in pairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            local char = p.Character
+            if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
+                local root = char.HumanoidRootPart
+                
+                if (Settings.ESPTeamCheck and p.Team == LocalPlayer.Team) or not IsVisible(root, "ESPWallCheck") then
+                    CleanESP(p)
+                    continue
+                end
+
+                if not ESPObjects[p] then
+                    ESPObjects[p] = {Box = Drawing.new("Square"), Bar = Drawing.new("Line"), Name = Drawing.new("Text"), Dist = Drawing.new("Text")}
+                    ESPObjects[p].Name.Center = true; ESPObjects[p].Dist.Center = true
+                    ESPObjects[p].Name.Outline = true; ESPObjects[p].Dist.Outline = true
+                end
+
+                local top, onScreen1 = Camera:WorldToViewportPoint(root.Position + Vector3.new(0, 2.3, 0))
+                local bottom, onScreen2 = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3, 0))
+
+                if onScreen1 or onScreen2 then
+                    local height = math.abs(top.Y - bottom.Y)
+                    local width = height / 1.8
+                    local obj = ESPObjects[p]
+                    
+                    obj.Box.Visible = Settings.ESPBox
+                    obj.Box.Size = Vector2.new(width, height)
+                    obj.Box.Position = Vector2.new(top.X - width/2, top.Y)
+                    obj.Box.Color = Palette[Settings.BoxCol]
+                    
+                    obj.Bar.Visible = Settings.ESPHealth
+                    obj.Bar.From = Vector2.new(top.X - width/2 - 5, top.Y + height)
+                    obj.Bar.To = Vector2.new(top.X - width/2 - 5, top.Y + height - (height * (char.Humanoid.Health / char.Humanoid.MaxHealth)))
+                    obj.Bar.Color = Palette[Settings.HealthCol]
+                    
+                    obj.Name.Visible = Settings.ESPNames
+                    obj.Name.Position = Vector2.new(top.X, top.Y - 16)
+                    obj.Name.Text = p.Name
+                    obj.Name.Color = Palette[Settings.NameCol]
+                    obj.Name.Size = 13
+                    
+                    obj.Dist.Visible = Settings.ESPDistance
+                    obj.Dist.Position = Vector2.new(bottom.X, bottom.Y + 2)
+                    obj.Dist.Text = math.floor((Camera.CFrame.Position - root.Position).Magnitude) .. "m"
+                    obj.Dist.Color = Palette[Settings.DistCol]
+                    obj.Dist.Size = 12
+                else
+                    CleanESP(p)
+                end
+
+                -- Structural Skeleton Controller
+                if not SkeletonObjects[p] then SkeletonObjects[p] = {} end
+                local skeletonSetup = char.Humanoid.RigType == Enum.HumanoidRigType.R15 and R15Skeleton or R6Skeleton
+                
+                for i, bonePair in ipairs(skeletonSetup) do
+                    if not SkeletonObjects[p][i] then
+                        SkeletonObjects[p][i] = Drawing.new("Line")
+                        SkeletonObjects[p][i].Thickness = 1.2
+                    end
+                    
+                    local line = SkeletonObjects[p][i]
+                    local b1, b2 = char:FindFirstChild(bonePair[1]), char:FindFirstChild(bonePair[2])
+                    
+                    if b1 and b2 and Settings.ESPSkeleton and (onScreen1 or onScreen2) then
+                        local p1, o1 = Camera:WorldToViewportPoint(b1.Position)
+                        local p2, o2 = Camera:WorldToViewportPoint(b2.Position)
+                        
+                        if o1 and o2 then
+                            line.From = Vector2.new(p1.X, p1.Y)
+                            line.To = Vector2.new(p2.X, p2.Y)
+                            line.Color = Palette[Settings.BoxCol]
+                            line.Visible = true
+                        else line.Visible = false end
+                    else line.Visible = false end
+                end
+            else
+                CleanESP(p)
+            end
+        end
+    end
+
+    if Settings.Aimbot and Aiming then
+        CurrentTarget = GetClosest()
+        if CurrentTarget and math.random(1, 100) <= Settings.HitChance then
+            local pos, onScreen = Camera:WorldToViewportPoint(CurrentTarget.Position)
+            if onScreen then
+                local mouseLoc = UserInputService:GetMouseLocation()
+                local diff = Vector2.new(pos.X - mouseLoc.X, pos.Y - mouseLoc.Y)
+                if diff.Magnitude > Settings.Deadzone then 
+                    mousemoverel(diff.X * Settings.Smoothness, diff.Y * Settings.Smoothness) 
+                end
+            end
+        end
+    else CurrentTarget = nil end
+end)
+
+-- Structural Garbage Collection
+Players.PlayerRemoving:Connect(function(p)
+    if ESPObjects[p] then for _, o in pairs(ESPObjects[p]) do o:Remove() end; ESPObjects[p] = nil end
+    if SkeletonObjects[p] then for _, l in pairs(SkeletonObjects[p]) do l:Remove() end; SkeletonObjects[p] = nil end
+end)
